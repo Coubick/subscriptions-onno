@@ -1,0 +1,25 @@
+spring:
+  application:
+    name: subscriptions-onno
+  datasource:
+    url: jdbc:h2:file:./data/subscriptions;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: sa
+onno:
+  ui:
+    # Язык интерфейса фреймворка (встроенный бандл messages-ru).
+    locale: ru
+  auth:
+    mode: in-memory
+    # Демо-пользователь. Перед реальным использованием сменить пароль.
+    users:
+      - username: admin
+        password: admin
+        roles: [ADMIN]
+    session:
+      timeout: 8h
+      remember-me:
+        enabled: true
+        validity: 14d
+        # Dev на одной ноде: встроенный несекретный ключ. В продакшене задать стабильный key.
+        allow-ephemeral-key: true
