@@ -57,11 +57,15 @@ public class DashboardPage implements Page {
                         + EnumerationPersistence.resolveId(SubscriptionStatus.class, SubscriptionStatus.ACTIVE) + "'")
                 .hint("Подписки в статусе «Активна».");
 
-        b.chart("Выручка по тарифам", TariffRevenue.class).width("full").order(3).rowBreak()
+        b.chart("Выручка по тарифам, ₽", TariffRevenue.class).width("full").order(3).rowBreak()
                 .category(TariffRevenue::getTariff)
-                .sum(TariffRevenue::getAmount).label("Выручка")
-                .bar().currency(RUB).locale(LOCALE)
-                .hint("За выбранный период.");
+                .sum(TariffRevenue::getAmount).label("Выручка, ₽")
+                // Без currency: ось Y в onno шириной 40px, «20 тыс. ₽» в неё не помещается, «20 тыс.» — да.
+                .bar().locale(LOCALE)
+                .hint("За выбранный период.")
+                // onno 3.4.1 группирует обороты регистра по сырому значению измерения, и на оси
+                // оказываются UUID тарифов. Строки оборотов уже несут подпись в tariff_display.
+                .config("groupBy", "tariff_display");
 
         b.widget("Последние подписки").type("list").width("1/2").order(4).rowBreak()
                 .document(Subscription.class)
