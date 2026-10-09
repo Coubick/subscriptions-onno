@@ -77,6 +77,103 @@ class SubscriptionPostingIT {
         return subscriptions.findById(s.getId()).orElseThrow();
     }
 
+    private Ref<Tariff> tariffWithAvailability(Boolean available) {
+        Tariff t = new Tariff();
+        t.setDescription("Тариф " + available);
+        t.setPricePerPeriod(new BigDecimal("100.00"));
+        t.setPeriodDays(30);
+        t.setAvailableForConnection(available);
+        return Ref.of(Tariff.class, tariffs.save(t).getId());
+    }
+
+    private Subscription subscriptionOn(Ref<Tariff> onTariff) {
+        SubscriptionLine line = new SubscriptionLine();
+        line.setTariff(onTariff);
+        line.setPeriods(1);
+        Subscription s = new Subscription();
+        s.setClient(client);
+        s.getLines().add(line);
+        return s;
+    }
+
+    @Test
+    void unavailableTariffIsRejected() {
+        Subscription s = subscriptionOn(tariffWithAvailability(false));
+
+        assertThatThrownBy(() -> subscriptions.save(s))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("недоступен для подключения");
+    }
+
+    @Test
+    void tariffWithoutAvailabilityFlagCannotBeSaved() {
+        // NULL в БД репозиторий прочитал бы как true (инициализатор), поэтому флаг обязателен.
+        assertThatThrownBy(() -> tariffWithAvailability(null))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("Доступен для подключения");
+    }
+
+    @Test
+    void availableTariffPasses() {
+        Subscription saved = subscriptions.save(subscriptionOn(tariffWithAvailability(true)));
+
+        assertThat(reload(saved).getTotal()).isEqualByComparingTo("100.00");
+    }
+
+    @Test
+    void withdrawingTariffDoesNotBlockSavingPostedSubscription() {
+        pay("100.00");
+        Ref<Tariff> onTariff = tariffWithAvailability(true);
+        Subscription s = subscriptions.save(subscriptionOn(onTariff));
+        posting.post(s);
+
+        Tariff t = tariffs.findById(onTariff.id()).orElseThrow();
+        t.setAvailableForConnection(false);
+        tariffs.save(t);
+
+        Subscription posted = reload(s);
+        posted.setStatus(SubscriptionStatus.EXPIRED);
+        subscriptions.save(posted);
+        assertThat(reload(s).getStatus()).isEqualTo(SubscriptionStatus.EXPIRED);
+    }
+
+    @Test
+    void saveSubstitutesPriceAndPeriodFromTariff() {
+        SubscriptionLine line = new SubscriptionLine();
+        line.setTariff(tariff);
+        line.setPeriods(2);
+        Subscription s = new Subscription();
+        s.setClient(client);
+        s.getLines().add(line);
+
+        Subscription saved = reload(subscriptions.save(s));
+
+        SubscriptionLine stored = saved.getLines().get(0);
+        assertThat(stored.getPrice()).isEqualByComparingTo("100.00");
+        assertThat(stored.getPeriodDays()).isEqualTo(30);
+        assertThat(stored.getAmount()).isEqualByComparingTo("200.00");
+        assertThat(saved.getTotal()).isEqualByComparingTo("200.00");
+        assertThat(saved.getEndDate()).isEqualTo(saved.getStartDate().plusDays(60));
+    }
+
+    @Test
+    void draftFollowsTariffButPostedKeepsSnapshot() {
+        pay("1000.00");
+        Subscription draft = saveSubscription("100.00", 1);
+        Subscription posted = saveSubscription("100.00", 1);
+        posting.post(posted);
+
+        Tariff t = tariffs.findById(tariff.id()).orElseThrow();
+        t.setPricePerPeriod(new BigDecimal("150.00"));
+        tariffs.save(t);
+
+        assertThat(reload(subscriptions.save(reload(draft))).getTotal()).isEqualByComparingTo("150.00");
+
+        posting.repost(reload(posted));
+        assertThat(reload(posted).getTotal()).isEqualByComparingTo("100.00");
+        assertThat(balances.balanceOf(client)).isEqualByComparingTo("900.00");
+    }
+
     @Test
     void saveRunsOnFillingAndBeforeWrite() {
         Subscription s = reload(saveSubscription("100.00", 3));

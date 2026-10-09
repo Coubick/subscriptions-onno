@@ -28,7 +28,7 @@ public class SubscriptionLine extends TabularSectionRow {
     @Attribute(displayName = "Периодов", precision = 6, scale = 0, min = 1)
     private Integer periods = 1;
 
-    /** Цена за один период. На уровне 2 подставляется из тарифа. */
+    /** Цена за один период. У непроведённой подписки подставляется из тарифа при сохранении. */
     @Attribute(displayName = "Цена", precision = 15, scale = 2, min = 0)
     private BigDecimal price = BigDecimal.ZERO;
 
@@ -36,8 +36,8 @@ public class SubscriptionLine extends TabularSectionRow {
     private BigDecimal amount = BigDecimal.ZERO;
 
     /**
-     * Снимок длительности одного периода тарифа в днях. Нужен, чтобы {@code beforeWrite} (без Spring DI)
-     * мог посчитать дату окончания, не читая справочник. На уровне 2 подставляется из тарифа вместе с ценой.
+     * Снимок длительности одного периода тарифа в днях: подставляется из тарифа вместе с ценой, чтобы
+     * проведённая подписка не зависела от последующих правок тарифа.
      */
     @Attribute(displayName = "Дней в периоде", precision = 6, scale = 0, min = 1)
     private Integer periodDays;

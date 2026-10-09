@@ -35,16 +35,17 @@ import java.util.List;
  *
  * <ul>
  *   <li>{@link OnFillingHandler}: дата документа и дата начала при создании.</li>
- *   <li>{@link BeforeWriteHandler}: при каждом сохранении пересчитывает суммы строк, итог и дату окончания.
- *       Срок действия равен дате начала плюс максимальный срок среди строк (дней в периоде × периодов).</li>
+ *   <li>{@link BeforeWriteHandler}: у непроведённой подписки подставляет в строки цену и длительность периода
+ *       из тарифа ({@link SubscriptionPricing}); затем при каждом сохранении пересчитывает суммы строк, итог
+ *       и дату окончания. Срок действия равен дате начала плюс максимальный срок среди строк
+ *       (дней в периоде × периодов).</li>
  *   <li>{@link Validated}: клиент обязателен, нужна хотя бы одна строка, у строки заданы тариф и число
- *       периодов больше нуля; проведённую подписку нельзя перевести в «Отменена» без отмены проведения.</li>
+ *       периодов больше нуля, тариф доступен для подключения (до проведения); проведённую подписку нельзя перевести в «Отменена» без отмены проведения.</li>
  *   <li>{@link BeforePostHandler}: проверяет, что на лицевом счёте хватает средств.</li>
  *   <li>{@link Postable}: списывает сумму с {@link ClientAccount} и пишет выручку в {@link TariffRevenue}.</li>
  * </ul>
  *
- * <p>Пока не реализовано (нужен доступ к справочнику тарифов, а в хуках нет Spring DI): подстановка цены
- * и длительности периода из тарифа, проверка «тариф доступен для подключения».</p>
+ * <p>Хуки создаёт фреймворк, а не Spring, поэтому сервисы берутся через {@link SpringBeans}.</p>
  */
 @Document(name = "Subscriptions", title = "Подписки", numberPrefix = "SUB-", context = "Subscriptions")
 @AccessControl(readRoles = {"MANAGER"}, writeRoles = {"MANAGER"})
@@ -82,8 +83,20 @@ public class Subscription extends DocumentObject
         }
     }
 
+    /**
+     * Проведённая подписка уже оплачена: её цены — снимок на момент проведения, и смена цены тарифа
+     * их не трогает. Непроведённая следует за тарифом при каждом сохранении.
+     */
     @Override
     public void beforeWrite() {
+        if (!isPosted()) {
+            SpringBeans.get(SubscriptionPricing.class).applyTariffs(lines);
+        }
+        recalculate();
+    }
+
+    /** Суммы строк, итог и дата окончания. Чистый расчёт без обращения к справочникам. */
+    void recalculate() {
         BigDecimal sum = BigDecimal.ZERO;
         long maxDays = 0;
         for (SubscriptionLine line : lines) {
@@ -111,6 +124,10 @@ public class Subscription extends DocumentObject
                         () -> lines.stream().allMatch(l -> l.getTariff() != null)),
                 new BusinessRule("line-periods-positive", "Число периодов в каждой строке должно быть больше нуля",
                         () -> lines.stream().allMatch(l -> l.getPeriods() != null && l.getPeriods() > 0)),
+                // Проверяется только до проведения: снятие тарифа с продажи не должно блокировать
+                // сохранение уже оплаченных подписок (например, перевод в «Истекла» заданием).
+                new BusinessRule("line-tariff-available", "Тариф в строке недоступен для подключения",
+                        () -> isPosted() || SpringBeans.get(SubscriptionPricing.class).allTariffsAvailable(lines)),
                 // Обычное сохранение не перепроводит документ: движения проведённой подписки остались бы
                 // в регистрах. Отменить можно только после отмены проведения.
                 BusinessRule.onField("status", "Сначала отмените проведение",

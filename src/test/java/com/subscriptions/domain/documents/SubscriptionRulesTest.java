@@ -14,7 +14,10 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Чистые правила и расчёты Subscription, без Spring. */
+/**
+ * Чистые правила и расчёты Subscription, без Spring. Правило «тариф доступен» читает справочник
+ * через Spring-контекст и проверяется в {@link SubscriptionPostingIT}.
+ */
 class SubscriptionRulesTest {
 
     private static SubscriptionLine line(String price, int periods, Integer periodDays) {
@@ -33,8 +36,11 @@ class SubscriptionRulesTest {
         return s;
     }
 
+    private static final String NEEDS_SPRING = "line-tariff-available";
+
     private static List<String> failed(Subscription s) {
         return s.rules().stream()
+                .filter(r -> !NEEDS_SPRING.equals(r.name()))
                 .filter(r -> !r.condition().getAsBoolean())
                 .map(BusinessRule::name)
                 .toList();
@@ -93,14 +99,14 @@ class SubscriptionRulesTest {
     }
 
     @Test
-    void beforeWriteRecalculatesAmountsTotalAndEndDateByLongestLine() {
+    void recalculateComputesAmountsTotalAndEndDateByLongestLine() {
         Subscription s = valid();
         s.getLines().clear();
         s.getLines().add(line("1000.00", 1, 365));
         s.getLines().add(line("100.00", 3, 30));
         s.setStartDate(LocalDate.of(2026, 1, 1));
 
-        s.beforeWrite();
+        s.recalculate();
 
         assertThat(s.getLines().get(0).getAmount()).isEqualByComparingTo("1000.00");
         assertThat(s.getLines().get(1).getAmount()).isEqualByComparingTo("300.00");

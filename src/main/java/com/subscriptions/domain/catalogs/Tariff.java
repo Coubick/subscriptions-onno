@@ -29,8 +29,14 @@ public class Tariff extends CatalogObject implements Validated {
     @Attribute(displayName = "Длительность периода, дн.", required = true, min = 1)
     private Integer periodDays;
 
-    @Attribute(displayName = "Доступен для подключения")
-    private boolean availableForConnection = true;
+    /**
+     * Обязательный: создание через REST без этого поля не применяет инициализатор и записало бы NULL.
+     * Хуже того, репозиторий читает NULL как {@code true}: Spring Data не перезаписывает инициализатор
+     * значением {@code null}. {@code Boolean}, а не {@code boolean}, чтобы пропуск поля ловила проверка
+     * {@code required}, а правило подписки сравнивало через {@code Boolean.TRUE.equals}.
+     */
+    @Attribute(displayName = "Доступен для подключения", required = true)
+    private Boolean availableForConnection = true;
 
     @Override
     public List<BusinessRule> rules() {
