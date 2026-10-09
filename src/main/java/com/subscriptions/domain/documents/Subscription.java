@@ -69,6 +69,9 @@ public class Subscription extends DocumentObject
     @Attribute(displayName = "Итого", precision = 15, scale = 2)
     private BigDecimal total = BigDecimal.ZERO;
 
+    @Attribute(displayName = "Примечание", length = 1000)
+    private String comment;
+
     @TabularSection(name = "lines")
     private List<SubscriptionLine> lines = new ArrayList<>();
 
@@ -85,11 +88,12 @@ public class Subscription extends DocumentObject
 
     /**
      * Проведённая подписка уже оплачена: её цены — снимок на момент проведения, и смена цены тарифа
-     * их не трогает. Непроведённая следует за тарифом при каждом сохранении.
+     * их не трогает. Отменённая тоже сохраняет цены, по которым её оформляли. Остальные следуют
+     * за тарифом при каждом сохранении.
      */
     @Override
     public void beforeWrite() {
-        if (!isPosted()) {
+        if (!isPosted() && status != SubscriptionStatus.CANCELLED) {
             SpringBeans.get(SubscriptionPricing.class).applyTariffs(lines);
         }
         recalculate();
@@ -124,10 +128,11 @@ public class Subscription extends DocumentObject
                         () -> lines.stream().allMatch(l -> l.getTariff() != null)),
                 new BusinessRule("line-periods-positive", "Число периодов в каждой строке должно быть больше нуля",
                         () -> lines.stream().allMatch(l -> l.getPeriods() != null && l.getPeriods() > 0)),
-                // Проверяется только до проведения: снятие тарифа с продажи не должно блокировать
-                // сохранение уже оплаченных подписок (например, перевод в «Истекла» заданием).
+                // Проверяется только при оформлении: снятие тарифа с продажи не должно блокировать
+                // сохранение оплаченных (например, перевод в «Истекла» заданием) и отменённых подписок.
                 new BusinessRule("line-tariff-available", "Тариф в строке недоступен для подключения",
-                        () -> isPosted() || SpringBeans.get(SubscriptionPricing.class).allTariffsAvailable(lines)),
+                        () -> isPosted() || status == SubscriptionStatus.CANCELLED
+                                || SpringBeans.get(SubscriptionPricing.class).allTariffsAvailable(lines)),
                 // Обычное сохранение не перепроводит документ: движения проведённой подписки остались бы
                 // в регистрах. Отменить можно только после отмены проведения.
                 BusinessRule.onField("status", "Сначала отмените проведение",

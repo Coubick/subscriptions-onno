@@ -3,20 +3,35 @@ package com.subscriptions.ui;
 import com.subscriptions.domain.catalogs.Client;
 import com.subscriptions.domain.catalogs.Tariff;
 import com.subscriptions.domain.documents.Subscription;
+import com.subscriptions.domain.documents.SubscriptionCancellation;
 import com.subscriptions.domain.documents.SubscriptionLine;
 import com.subscriptions.domain.enumerations.SubscriptionStatus;
+import su.onno.ui.ActionContext;
+import su.onno.ui.ActionRejectedException;
+import su.onno.ui.ActionResult;
+import su.onno.ui.ActionScope;
+import su.onno.ui.ActionSpec;
+import su.onno.ui.ActionToast;
 import su.onno.ui.EntityConfigBuilder;
 import su.onno.ui.EntityView;
+import su.onno.ui.InputType;
 import su.onno.ui.ListSpec;
+import su.onno.validation.ValidationException;
 
 import org.springframework.stereotype.Component;
 
-/** Подписки: шапка, строки тарифов и проведение со списанием с лицевого счёта. */
+/** Подписки: шапка, строки тарифов, проведение со списанием с лицевого счёта и отмена с причиной. */
 @Component
 public class SubscriptionView implements EntityView<Subscription> {
 
     private static final String MONEY = "currency:RUB";
     private static final String DATE = "dd-MM-yyyy";
+
+    private final SubscriptionCancellation cancellation;
+
+    public SubscriptionView(SubscriptionCancellation cancellation) {
+        this.cancellation = cancellation;
+    }
 
     @Override
     public Class<Subscription> entity() {
@@ -65,6 +80,8 @@ public class SubscriptionView implements EntityView<Subscription> {
                 .hint("Считается при сохранении: дата начала плюс самый длинный срок среди строк.");
         f.field(Subscription::getTotal).order(60).width("half").format(MONEY)
                 .hint("Сумма строк. Списывается с лицевого счёта при проведении.");
+        f.field(Subscription::getComment).order(70).widget("textarea").width("full")
+                .hint("При отмене сюда записывается причина.");
         f.field(Subscription::isPosted).label("Проведена");
 
         f.rowRefField(Subscription::getLines, SubscriptionLine::getTariff).label("Тариф")
@@ -79,5 +96,41 @@ public class SubscriptionView implements EntityView<Subscription> {
                 .hint("Цена × периодов.");
 
         f.action("post").primary();
+    }
+
+    /** «Отменить подписку» в строке списка и в меню формы: одна и та же операция. */
+    @Override
+    public void actions(ActionSpec actions) {
+        cancelAction(actions.action("cancel").scope(ActionScope.ROW));
+        cancelAction(actions.action("cancelTop").scope(ActionScope.DETAIL));
+    }
+
+    private void cancelAction(ActionSpec.ActionBuilder action) {
+        action.label("Отменить подписку").icon("ban")
+                // Только отображение: обработчик проверяет статус ещё раз.
+                .visibleWhen(row -> SubscriptionCancellation.cancellable(
+                        row.enumValue(Subscription::getStatus, SubscriptionStatus.class)))
+                .form(f -> f.title("Отмена подписки")
+                        .description("Проведённая подписка будет распроведена: деньги вернутся на лицевой "
+                                + "счёт, выручка будет сторнирована.")
+                        .submitLabel("Отменить подписку")
+                        .input("reason").label("Причина отмены").type(InputType.TEXTAREA).required())
+                .handler(this::cancel);
+    }
+
+    private ActionResult cancel(ActionContext ctx) {
+        try {
+            Subscription cancelled = cancellation.cancel(ctx.id(), ctx.input("reason"));
+            return ActionResult.refresh(ActionToast.success("Подписка " + cancelled.getNumber() + " отменена"));
+        } catch (ValidationException e) {
+            ActionRejectedException.Builder rejected = ActionRejectedException.builder()
+                    .title("Не удалось отменить подписку").keepFormOpen(true);
+            if ("reason".equals(e.getField())) {
+                rejected.fieldError("reason", e.getMessage());
+            } else {
+                rejected.message(e.getMessage());
+            }
+            throw rejected.build();
+        }
     }
 }
